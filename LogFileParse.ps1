@@ -1,6 +1,9 @@
-﻿$htmlfile = '.\LyncLog.html'
+﻿$outfileDir = $env:USERPROFILE
+$htmlfile = $env:USERPROFILE + '\LyncLog.html'
+
 out-file $htmlfile
 
+# HTML Formatting
 $Header = @"
 <style>
 TABLE {border-width: 1px;border-style: solid;border-color: black;border-collapse: collapse;}
@@ -16,56 +19,75 @@ Lync Log File Parse
 </title>
 "@
 
+# Load Lync log files and grab each line that contains a VQ Report
 select-String $env:LocalAppData\Microsoft\Office\15.0\Lync\Tracing\*.UccApilog* -pattern "<vqreport" |
+    # Convert output into XML Data
     ForEach-Object {
-        $information = $_ | Select-Object -Property Name, v2:CPUName, v2:CPUNumberOfCores, LocalUserAgent, Start, End, ToURI, RecvListenMOS, LossRate, PayloadDescription, v2:CIFQuality, v2:VGAQuality, v2:HD720Quality, VideoFrameRateAvg, Resolution, v3:RecvCodecTypes
+        $check =  $_.Line -match "</VQReportEvent>"
+        if($check -NotMatch "True"){
+            $_.Line += "</VQSessionReport></VQReportEvent>"
+        }
+        $xmldoc = [xml]$_.Line
 
-        $headerProperties = 'Name', 'v2:CPUName', 'v2:CPUNumberOfCores', 'Start', 'End', 'LocalUserAgent'
+        # Choose Fields to Grab
+        $information = $_ | Select-Object -Property Name, OS, CPUName, CPUNumberOfCores, `
+            Start, End, FromURI, ToURI, LocalUserAgent, `
+            AUdioCodec, AudioCaptureDevName, AudioCaptureDevDriver, AudioRenderDevName, AudioRenderDevDriver, RecvListenMOS, `
+            MainVideoCodec, MainVideoCaptureDevName, MainVideoCaptureDevDriver, MainVideoRenderDevName, MainVideoRenderDevDriver
 
-        foreach($headerproperty in $headerProperties){
-            $infoHeaderTemp = ($_.Line -split '" ')
-            $information.$headerproperty = ($infoHeaderTemp -split '">') | select-string $headerproperty= | foreach-object {
-                $_ -replace '="', ' ' ` -replace $headerproperty, '' ` -replace ' ','' 
-            }
+        # Grab Endpoint Statistics
+        $endpointChoices = "Name", "OS", "CPUName", "CPUNumberOfCores"
+        $endpoint = $xmldoc.VQReportEvent.VQSessionReport.Endpoint
+        foreach($endpointchoice in $endpointChoices){
+            $information.$endpointchoice = $endpoint.$endpointchoice
         }
 
-        $InboundAudioProperties = 'ToURI', 'RecvListenMOS', 'LossRate', 'PayloadDescription'
+        # Grab DialogInfo Statistics
+        $dialogChoices = "Start", "End", "FromURI", "ToURI", "LocalUserAgent"
+        $dialog = $xmldoc.VQReportEvent.VQSessionReport.DialogInfo
+        foreach($dialogchoice in $dialogChoices){
+            $information.$dialogchoice = $dialog.$dialogchoice
+        }
 
-        foreach($inboundAudioProperty in $inboundAudioProperties){
-            $infoInboundAudioTempPre = ($_.Line -split '/InboundStream>')
-            $infoInboundAudioTemp = ($infoInboundAUdioTempPre[0] -split '/>')
-            $information.$inboundAudioProperty = ($infoInboundAudioTemp -split '><') |select-string $inboundAudioProperty'>'|foreach-object {
-                $_ -replace '>', ' ' ` -replace $inboundAudioProperty, '' ` -replace '</', '' 
-            }
-         }
+        # Grab MediaLine main-audio Statistics
+        if($information.ToURI -notmatch "applicationsharing"){
+            $mainaudio = $xmldoc.VQReportEvent.VQSessionReport.MediaLine
+            $information.AudioCodec = $mainaudio.InboundStream.Payload.Audio.PayloadDescription
+            $information.AudioCaptureDevName = $mainaudio.Description.CaptureDev.Name[0]
+            $information.AudioCaptureDevDriver = $mainaudio.Description.CaptureDev.Driver[0]
+            $information.AudioRenderDevName = $mainaudio.Description.RenderDev.Name[0]
+            $information.AudioRenderDevDriver = $mainaudio.Description.RenderDev.Driver[0]
+            $information.RecvListenMOS = $mainaudio.InboundStream.QualityEstimates.Audio.RecvListenMOS
+        }
 
-         $InboundVideoProperties = 'v2:CIFQuality', 'v2:VGAQuality', 'v2:HD720Quality', 'VideoFrameRateAvg', 'Resolution', 'v3:RecvCodecTypes'
+        # Grab MediaLine main-MainVideo Statistics
+        if($information.ToURI -notmatch "applicationsharing"){
+            $MainVideo = $xmldoc.VQReportEvent.VQSessionReport.MediaLine
+            $information.MainVideoCodec = $MainVideo.InboundStream.Payload.Video.PayloadDescription[1]
+            $information.MainVideoCaptureDevName = $MainVideo.Description.CaptureDev.Name[1]
+            $information.MainVideoCaptureDevDriver = $MainVideo.Description.CaptureDev.Driver[1]
+            $information.MainVideoRenderDevName = $MainVideo.Description.RenderDev.Name[1]
+            $information.MainVideoRenderDevDriver = $MainVideo.Description.RenderDev.Driver[1]
+        }
 
-         foreach($inboundVideoProperty in $InboundVideoProperties){
-            $infoInboundVideoTemp = $infoInboundAudioTempPre[1] ` -split '<InboundStream' ` -split '/InboundStream>'
-            $information.$inboundVideoProperty = ($infoInboundVideoTemp[1] -split '><') | select-string $inboundVideoProperty'>' | foreach-object {
-                $_ -replace '>', ' ' ` -replace $inboundVideoProperty, '' -replace '</', '' 
-            }
-         }
-    $information 
- #   $pre += "<b>Computer Name:  " + $information.Name[0] + `
- #       "<br>CPU:  " + $information."v2:CPUName" + `
- #       "<br>CPU Cores:  " + $information."v2:CPUNumberOfCores" + `
- #       "<br>Lync Version:  " + $information.LocalUserAgent + `
- #       "<br><br></b>"
- #   $post += "End File"
-    } | select @{name="Start Time";expression={$_.Start}}, `
-        @{name="End Time";expression={$_.End}}, `
-        @{name="To User";expression={$_.ToURI}}, `
-        @{name="MOS";expression={$_.RecvListenMOS}}, `
-        @{name="Packet Loss";expression={$_.LossRate}}, `
-        @{name="Audio Codec";expression={$_.PayloadDescription}}, `
-        @{name="CIF Quality %";expression={$_."v2:CIFQuality"}}, `
-        @{name="VGA Quality %";expression={$_."v2:VGAQuality"}}, `
-        @{name="HD Quality %";expression={$_."v2:HD720Quality"}}, `
-        @{name="FPS";expression={$_.VideoFrameRateAvg}}, `
-        @{name="Resolution";expression={$_.Resolution}}, `
-        @{name="Video Codec";expression={$_."v3:RecvCodecTypes"}} `
-        | ConvertTo-Html -head $header| Out-File $htmlfile -append
+
+        $information 
+    } | select @{name="Start Time";expression={[datetime]$information.Start}}, ` 
+        @{name="End Time";expression={[datetime]$information.End}}, `
+        @{name="From User";expression={$information.FromURI}}, `
+        @{name="To User";expression={$information.ToURI}}, `
+        @{name="Lync Version";expression={$information.LocalUserAgent}}, `
+        @{name="Audio Codec";expression={$information.AudioCodec}}, `
+        @{name="Audio Capture Name";expression={$information.AudioCaptureDevName}}, `
+        @{name="Audio Capture Driver";expression={$information.AudioCaptureDevDriver}}, `
+        @{name="Audio Render Name";expression={$information.AudioRenderDevName}}, `
+        @{name="Audio Render Driver";expression={$information.AudioRenderDevDriver}}, `
+        @{name="Audio MOS";expression={$information.RecvListenMos}}, `
+        @{name="Main Video Codec";expression={$information.MainMainVideoCodec}}, `
+        @{name="Main Video Capture Name";expression={$information.MainVideoCaptureDevName}}, `
+        @{name="Main Video Capture Driver";expression={$information.MainVideoCaptureDevDriver}}, `
+        @{name="Main Video Render Name";expression={$information.MainVideoRenderDevName}}, `
+        @{name="Main Video Render Driver";expression={$information.MainVideoRenderDevDriver}} `
+        | ConvertTo-Html -head $header | Out-File $htmlfile -append
 
 Invoke-Expression $htmlfile

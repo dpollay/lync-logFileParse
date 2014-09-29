@@ -1,4 +1,22 @@
-﻿$outfileDir = $env:USERPROFILE
+﻿#################################################################################
+#  Lync Log File Parser
+#  Copyright (C) 2014 David Pollay
+#  This program is free software; you can redistribute it and/or modify
+#  it under the terms of the GNU General Public License as published by
+#  the Free Software Foundation; either version 2 of the License, or
+#  (at your option) any later version.
+#
+#  This program is distributed in the hope that it will be useful,
+#  but WITHOUT ANY WARRANTY; without even the implied warranty of
+#  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#  GNU General Public License for more details.
+#
+#  You should have received a copy of the GNU General Public License along
+#  with this program; if not, write to the Free Software Foundation, Inc.,
+#  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+#################################################################################
+
+$outfileDir = $env:USERPROFILE
 $htmlfile = $env:USERPROFILE + '\LyncLog.html'
 
 out-file $htmlfile
@@ -33,7 +51,8 @@ select-String $env:LocalAppData\Microsoft\Office\15.0\Lync\Tracing\*.UccApilog* 
         $information = $_ | Select-Object -Property Name, OS, CPUName, CPUNumberOfCores, `
             Start, End, FromURI, ToURI, LocalUserAgent, `
             AUdioCodec, AudioCaptureDevName, AudioCaptureDevDriver, AudioRenderDevName, AudioRenderDevDriver, RecvListenMOS, `
-            MainVideoCodec, MainVideoCaptureDevName, MainVideoCaptureDevDriver, MainVideoRenderDevName, MainVideoRenderDevDriver
+            MainVideoCodec, MainVideoCaptureDevName, MainVideoCaptureDevDriver, MainVideoRenderDevName, MainVideoRenderDevDriver, mainVideoResolution, mainVideoFrameRateAvg, `
+            mainVideoCifQuality, mainVideoVGAQuality, mainVideoHDQuality
 
         # Grab Endpoint Statistics
         $endpointChoices = "Name", "OS", "CPUName", "CPUNumberOfCores"
@@ -63,11 +82,16 @@ select-String $env:LocalAppData\Microsoft\Office\15.0\Lync\Tracing\*.UccApilog* 
         # Grab MediaLine main-MainVideo Statistics
         if($information.ToURI -notmatch "applicationsharing"){
             $MainVideo = $xmldoc.VQReportEvent.VQSessionReport.MediaLine
-            $information.MainVideoCodec = $MainVideo.InboundStream.Payload.Video.PayloadDescription[1]
+            $information.MainVideoCodec = $MainVideo.InboundStream.Payload.Video.RecvCodecTypes[0]
             $information.MainVideoCaptureDevName = $MainVideo.Description.CaptureDev.Name[1]
             $information.MainVideoCaptureDevDriver = $MainVideo.Description.CaptureDev.Driver[1]
             $information.MainVideoRenderDevName = $MainVideo.Description.RenderDev.Name[1]
             $information.MainVideoRenderDevDriver = $MainVideo.Description.RenderDev.Driver[1]
+            $information.MainVideoResolution = $MainVideo.InboundStream.Payload.Video.Resolution[0]
+            $information.MainVideoFrameRateAvg = $MainVideo.InboundStream.Payload.Video.VideoFrameRateAvg[0]
+            $information.MainVideoCifQuality = $MainVideo.InboundStream.Payload.Video.VideoResolutionDistribution.CIFQuality[0]
+            $information.MainVideoVGAQuality = $MainVideo.InboundStream.Payload.Video.VideoResolutionDistribution.VGAQuality[0]
+            $information.MainVideoHDQuality = $MainVideo.InboundStream.Payload.Video.VideoResolutionDistribution.HD720Quality[0]
         }
 
 
@@ -83,11 +107,16 @@ select-String $env:LocalAppData\Microsoft\Office\15.0\Lync\Tracing\*.UccApilog* 
         @{name="Audio Render Name";expression={$information.AudioRenderDevName}}, `
         @{name="Audio Render Driver";expression={$information.AudioRenderDevDriver}}, `
         @{name="Audio MOS";expression={$information.RecvListenMos}}, `
-        @{name="Main Video Codec";expression={$information.MainMainVideoCodec}}, `
+        @{name="Main Video Codec";expression={$information.MainVideoCodec}}, `
         @{name="Main Video Capture Name";expression={$information.MainVideoCaptureDevName}}, `
         @{name="Main Video Capture Driver";expression={$information.MainVideoCaptureDevDriver}}, `
         @{name="Main Video Render Name";expression={$information.MainVideoRenderDevName}}, `
-        @{name="Main Video Render Driver";expression={$information.MainVideoRenderDevDriver}} `
+        @{name="Main Video Render Driver";expression={$information.MainVideoRenderDevDriver}}, `
+        @{name="Main Video Resolution";expression={$information.MainVideoResolution}}, `
+        @{name="Main Video FPS Avg";expression={$information.MainVideoFrameRateAvg}}, `
+        @{name="Main Video % CIF Quality";expression={$information.MainVideoCifQuality}}, `
+        @{name="Main Video % VGA Quality";expression={$information.MainVideoVGAQUality}}, `
+        @{name="Main Video % HD Quality";expression={$information.MainVideoHDQuality}} `
         | ConvertTo-Html -head $header | Out-File $htmlfile -append
 
 Invoke-Expression $htmlfile
